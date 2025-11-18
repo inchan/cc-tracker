@@ -153,8 +153,7 @@ impl ReportGenerator {
         // Create parent directories if needed
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                PromptTrackingError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                PromptTrackingError::IoError(std::io::Error::other(
                     format!("Failed to create directory: {}", e),
                 ))
             })?;
@@ -259,7 +258,7 @@ impl ReportGenerator {
                     prompt.created_at.format("%Y-%m-%d")
                 ));
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         // Category Statistics
@@ -273,7 +272,7 @@ impl ReportGenerator {
                     stat.name, stat.count, stat.avg_quality
                 ));
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         // Tag Statistics
@@ -390,8 +389,7 @@ impl ReportGenerator {
     /// Generate JSON report
     fn generate_json(&self, data: &ReportData) -> Result<String> {
         serde_json::to_string_pretty(data).map_err(|e| {
-            PromptTrackingError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            PromptTrackingError::IoError(std::io::Error::other(
                 format!("JSON serialization error: {}", e),
             ))
         })

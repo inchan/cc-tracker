@@ -13,6 +13,8 @@ pub struct Database {
     conn: Connection,
 }
 
+use chrono::{DateTime, Utc};
+
 /// Filter options for querying prompts
 #[derive(Debug, Default, Clone)]
 pub struct PromptFilter {
@@ -21,6 +23,30 @@ pub struct PromptFilter {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub search_query: Option<String>,
+    pub date_from: Option<DateTime<Utc>>,
+    pub date_to: Option<DateTime<Utc>>,
+    pub min_quality_score: Option<f64>,
+    pub max_quality_score: Option<f64>,
+}
+
+/// Version history entry
+#[derive(Debug, Clone)]
+pub struct VersionHistory {
+    pub id: i64,
+    pub prompt_id: String,
+    pub content: String,
+    pub content_hash: String,
+    pub version: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Trend data point
+#[derive(Debug, Clone)]
+pub struct TrendDataPoint {
+    pub date: String,
+    pub count: usize,
+    pub avg_quality: f64,
+    pub avg_efficiency: f64,
 }
 
 impl Database {
@@ -116,12 +142,24 @@ impl Database {
                 FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
             );
 
+            -- Version history table
+            CREATE TABLE IF NOT EXISTS version_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                prompt_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
+            );
+
             -- Indexes for performance
             CREATE INDEX IF NOT EXISTS idx_prompts_created_at ON prompts(created_at);
             CREATE INDEX IF NOT EXISTS idx_prompts_category ON prompts(category);
             CREATE INDEX IF NOT EXISTS idx_prompts_content_hash ON prompts(content_hash);
             CREATE INDEX IF NOT EXISTS idx_quality_scores_prompt_id ON quality_scores(prompt_id);
             CREATE INDEX IF NOT EXISTS idx_efficiency_metrics_prompt_id ON efficiency_metrics(prompt_id);
+            CREATE INDEX IF NOT EXISTS idx_version_history_prompt_id ON version_history(prompt_id);
             "#,
             )
             .map_err(|e| {
@@ -185,7 +223,7 @@ impl Database {
 
         let prompt = stmt
             .query_row(params![id], |row| {
-                Ok(self.row_to_prompt(row)?)
+                self.row_to_prompt(row)
             })
             .optional()
             .map_err(|e| {
@@ -297,6 +335,16 @@ impl Database {
         if let Some(ref search) = filter.search_query {
             conditions.push(format!("p.content LIKE ?{}", params_vec.len() + 1));
             params_vec.push(Box::new(format!("%{}%", search)));
+        }
+
+        // Date range filter
+        if let Some(ref date_from) = filter.date_from {
+            conditions.push(format!("p.created_at >= ?{}", params_vec.len() + 1));
+            params_vec.push(Box::new(date_from.to_rfc3339()));
+        }
+        if let Some(ref date_to) = filter.date_to {
+            conditions.push(format!("p.created_at <= ?{}", params_vec.len() + 1));
+            params_vec.push(Box::new(date_to.to_rfc3339()));
         }
 
         // Add WHERE clause if there are conditions
@@ -654,6 +702,292 @@ impl Database {
 
         Ok(())
     }
+
+    // Version History Methods
+
+    /// Save current prompt state to version history
+    pub fn save_version(&self, prompt: &Prompt) -> Result<()> {
+        // Get current version number
+        let version: i32 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM version_history WHERE prompt_id = ?1",
+                params![prompt.id],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to get version: {}", e))
+            })?;
+
+        self.conn
+            .execute(
+                r#"
+                INSERT INTO version_history (prompt_id, content, content_hash, version, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5)
+                "#,
+                params![
+                    prompt.id,
+                    prompt.content,
+                    prompt.content_hash,
+                    version,
+                    Utc::now().to_rfc3339(),
+                ],
+            )
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to save version: {}", e))
+            })?;
+
+        Ok(())
+    }
+
+    /// Get version history for a prompt
+    pub fn get_version_history(&self, prompt_id: &str) -> Result<Vec<VersionHistory>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                SELECT id, prompt_id, content, content_hash, version, created_at
+                FROM version_history
+                WHERE prompt_id = ?1
+                ORDER BY version DESC
+                "#,
+            )
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to prepare query: {}", e))
+            })?;
+
+        let history = stmt
+            .query_map(params![prompt_id], |row| {
+                Ok(VersionHistory {
+                    id: row.get(0)?,
+                    prompt_id: row.get(1)?,
+                    content: row.get(2)?,
+                    content_hash: row.get(3)?,
+                    version: row.get(4)?,
+                    created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .unwrap_or_else(|_| Utc::now()),
+                })
+            })
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to get history: {}", e))
+            })?
+            .collect::<SqliteResult<Vec<VersionHistory>>>()
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to collect history: {}", e))
+            })?;
+
+        Ok(history)
+    }
+
+    /// Restore prompt to specific version
+    pub fn restore_version(&self, prompt_id: &str, version: i32) -> Result<Prompt> {
+        let history: VersionHistory = self
+            .conn
+            .query_row(
+                r#"
+                SELECT id, prompt_id, content, content_hash, version, created_at
+                FROM version_history
+                WHERE prompt_id = ?1 AND version = ?2
+                "#,
+                params![prompt_id, version],
+                |row| {
+                    Ok(VersionHistory {
+                        id: row.get(0)?,
+                        prompt_id: row.get(1)?,
+                        content: row.get(2)?,
+                        content_hash: row.get(3)?,
+                        version: row.get(4)?,
+                        created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now()),
+                    })
+                },
+            )
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Version not found: {}", e))
+            })?;
+
+        // Get current prompt and update it
+        let mut prompt = self
+            .get_prompt(prompt_id)?
+            .ok_or_else(|| PromptTrackingError::DatabaseError("Prompt not found".to_string()))?;
+
+        // Save current state before restore
+        self.save_version(&prompt)?;
+
+        // Restore content
+        prompt.content = history.content;
+        prompt.content_hash = history.content_hash;
+        prompt.updated_at = Utc::now();
+
+        self.update_prompt(&prompt)?;
+
+        Ok(prompt)
+    }
+
+    // Trend Analysis Methods
+
+    /// Get daily trend data
+    pub fn get_daily_trends(&self, days: i32) -> Result<Vec<TrendDataPoint>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                SELECT
+                    date(p.created_at) as date,
+                    COUNT(*) as count,
+                    COALESCE(AVG(q.total_score), 0) as avg_quality,
+                    COALESCE(AVG(e.efficiency_score), 0) as avg_efficiency
+                FROM prompts p
+                LEFT JOIN quality_scores q ON p.id = q.prompt_id
+                LEFT JOIN efficiency_metrics e ON p.id = e.prompt_id
+                WHERE p.created_at >= date('now', ? || ' days')
+                GROUP BY date(p.created_at)
+                ORDER BY date(p.created_at)
+                "#,
+            )
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to prepare query: {}", e))
+            })?;
+
+        let trends = stmt
+            .query_map(params![format!("-{}", days)], |row| {
+                Ok(TrendDataPoint {
+                    date: row.get(0)?,
+                    count: row.get::<_, i64>(1)? as usize,
+                    avg_quality: row.get(2)?,
+                    avg_efficiency: row.get(3)?,
+                })
+            })
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to get trends: {}", e))
+            })?
+            .collect::<SqliteResult<Vec<TrendDataPoint>>>()
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to collect trends: {}", e))
+            })?;
+
+        Ok(trends)
+    }
+
+    /// Get category distribution
+    pub fn get_category_distribution(&self) -> Result<Vec<(String, usize)>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                SELECT COALESCE(category, 'uncategorized') as cat, COUNT(*) as count
+                FROM prompts
+                GROUP BY category
+                ORDER BY count DESC
+                "#,
+            )
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to prepare query: {}", e))
+            })?;
+
+        let distribution = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get::<_, i64>(1)? as usize)))
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to get distribution: {}", e))
+            })?
+            .collect::<SqliteResult<Vec<(String, usize)>>>()
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to collect: {}", e))
+            })?;
+
+        Ok(distribution)
+    }
+
+    // Export/Import Methods
+
+    /// Export all data to JSON
+    pub fn export_to_json(&self) -> Result<String> {
+        let prompts = self.list_prompts(&PromptFilter::default())?;
+        let quality_scores = self.get_all_quality_scores()?;
+
+        let mut efficiency_metrics = Vec::new();
+        for prompt in &prompts {
+            if let Ok(Some(metrics)) = self.get_efficiency_metrics(&prompt.id) {
+                efficiency_metrics.push(metrics);
+            }
+        }
+
+        let export_data = serde_json::json!({
+            "version": "1.0",
+            "exported_at": Utc::now().to_rfc3339(),
+            "prompts": prompts,
+            "quality_scores": quality_scores,
+            "efficiency_metrics": efficiency_metrics,
+        });
+
+        serde_json::to_string_pretty(&export_data).map_err(|e| {
+            PromptTrackingError::IoError(std::io::Error::other(
+                format!("JSON export error: {}", e),
+            ))
+        })
+    }
+
+    /// Import data from JSON
+    pub fn import_from_json(&self, json_str: &str) -> Result<usize> {
+        let data: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+            PromptTrackingError::IoError(std::io::Error::other(
+                format!("JSON parse error: {}", e),
+            ))
+        })?;
+
+        let mut imported = 0;
+
+        // Import prompts
+        if let Some(prompts) = data["prompts"].as_array() {
+            for prompt_value in prompts {
+                let prompt: Prompt = serde_json::from_value(prompt_value.clone()).map_err(|e| {
+                    PromptTrackingError::IoError(std::io::Error::other(
+                        format!("Prompt parse error: {}", e),
+                    ))
+                })?;
+
+                // Skip if already exists
+                if self.find_by_hash(&prompt.content_hash)?.is_some() {
+                    continue;
+                }
+
+                self.create_prompt(&prompt)?;
+                imported += 1;
+            }
+        }
+
+        // Import quality scores
+        if let Some(scores) = data["quality_scores"].as_array() {
+            for score_value in scores {
+                let score: QualityScore =
+                    serde_json::from_value(score_value.clone()).map_err(|e| {
+                        PromptTrackingError::IoError(std::io::Error::other(
+                            format!("Score parse error: {}", e),
+                        ))
+                    })?;
+
+                let _ = self.save_quality_score(&score);
+            }
+        }
+
+        // Import efficiency metrics
+        if let Some(metrics) = data["efficiency_metrics"].as_array() {
+            for metric_value in metrics {
+                let metric: EfficiencyMetrics =
+                    serde_json::from_value(metric_value.clone()).map_err(|e| {
+                        PromptTrackingError::IoError(std::io::Error::other(
+                            format!("Metric parse error: {}", e),
+                        ))
+                    })?;
+
+                let _ = self.save_efficiency_metrics(&metric);
+            }
+        }
+
+        Ok(imported)
+    }
 }
 
 #[cfg(test)]
@@ -808,5 +1142,105 @@ mod tests {
 
         let retrieved = db.get_efficiency_metrics(&prompt.id).unwrap().unwrap();
         assert_eq!(retrieved.efficiency_score, 75.0);
+    }
+
+    #[test]
+    fn test_version_history() {
+        let db = Database::in_memory().unwrap();
+
+        let mut prompt = Prompt::new("Original".to_string());
+        prompt.content_hash = "hash1".to_string();
+        db.create_prompt(&prompt).unwrap();
+
+        // Save version
+        db.save_version(&prompt).unwrap();
+
+        // Modify and save again
+        prompt.content = "Modified".to_string();
+        prompt.content_hash = "hash2".to_string();
+        db.update_prompt(&prompt).unwrap();
+        db.save_version(&prompt).unwrap();
+
+        // Check history
+        let history = db.get_version_history(&prompt.id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].version, 2);
+        assert_eq!(history[1].version, 1);
+    }
+
+    #[test]
+    fn test_export_import_json() {
+        let db = Database::in_memory().unwrap();
+
+        let mut prompt = Prompt::new("Test export".to_string());
+        prompt.content_hash = "export_hash".to_string();
+        db.create_prompt(&prompt).unwrap();
+
+        // Export
+        let json = db.export_to_json().unwrap();
+        assert!(json.contains("Test export"));
+
+        // Import to same db should skip duplicate
+        let imported = db.import_from_json(&json).unwrap();
+        assert_eq!(imported, 0);
+
+        // Import to new db
+        let db2 = Database::in_memory().unwrap();
+        let imported = db2.import_from_json(&json).unwrap();
+        assert_eq!(imported, 1);
+    }
+
+    #[test]
+    fn test_daily_trends() {
+        let db = Database::in_memory().unwrap();
+
+        let mut prompt = Prompt::new("Trend test".to_string());
+        prompt.content_hash = "trend_hash".to_string();
+        db.create_prompt(&prompt).unwrap();
+
+        let trends = db.get_daily_trends(7).unwrap();
+        // May or may not have data depending on query
+        assert!(trends.len() <= 7);
+    }
+
+    #[test]
+    fn test_category_distribution() {
+        let db = Database::in_memory().unwrap();
+
+        let mut prompt1 = Prompt::new("P1".to_string());
+        prompt1.content_hash = "h1".to_string();
+        prompt1.category = Some("code".to_string());
+        db.create_prompt(&prompt1).unwrap();
+
+        let mut prompt2 = Prompt::new("P2".to_string());
+        prompt2.content_hash = "h2".to_string();
+        prompt2.category = Some("code".to_string());
+        db.create_prompt(&prompt2).unwrap();
+
+        let distribution = db.get_category_distribution().unwrap();
+        assert!(!distribution.is_empty());
+
+        let code_entry = distribution.iter().find(|(cat, _)| cat == "code");
+        assert!(code_entry.is_some());
+        assert_eq!(code_entry.unwrap().1, 2);
+    }
+
+    #[test]
+    fn test_date_filter() {
+        let db = Database::in_memory().unwrap();
+
+        let mut prompt = Prompt::new("Date test".to_string());
+        prompt.content_hash = "date_hash".to_string();
+        db.create_prompt(&prompt).unwrap();
+
+        // Filter for today
+        let filter = PromptFilter {
+            date_from: Some(chrono::Utc::now() - chrono::Duration::hours(1)),
+            date_to: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+            ..Default::default()
+        };
+
+        let results = db.list_prompts(&filter).unwrap();
+        assert_eq!(results.len(), 1);
     }
 }

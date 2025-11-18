@@ -74,7 +74,7 @@ impl QualityAnalyzer {
 
         // Word count factor (optimal range: 10-100 words)
         let word_count = content.split_whitespace().count();
-        let word_score = if word_count >= 10 && word_count <= 100 {
+        let word_score = if (10..=100).contains(&word_count) {
             1.0
         } else if word_count < 10 {
             word_count as f64 / 10.0
@@ -418,7 +418,6 @@ pub fn generate_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::PromptMetadata;
 
     fn create_test_prompt(content: &str) -> Prompt {
         let mut prompt = Prompt::new(content.to_string());

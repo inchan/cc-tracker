@@ -10,6 +10,7 @@ pub mod analysis;
 pub mod reporting;
 pub mod utils;
 pub mod config;
+pub mod watcher;
 
 use thiserror::Error;
 
