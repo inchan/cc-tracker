@@ -1,0 +1,14 @@
+# Clippy configuration
+# See: https://rust-lang.github.io/rust-clippy/
+
+# Maximum cognitive complexity allowed
+cognitive-complexity-threshold = 15
+
+# Maximum number of lines a function can have
+too-many-lines-threshold = 100
+
+# Maximum number of arguments a function can have
+too-many-arguments-threshold = 7
+
+# Minimum number of struct fields for the 'struct_excessive_bools' lint
+max-struct-bools = 3
