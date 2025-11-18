@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp:*)",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "Context7",
+    "Puppeteer",
+    "Sequential-Thinking",
+    "basic-memory",
+    "obsidian"
+  ]
+}
