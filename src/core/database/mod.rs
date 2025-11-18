@@ -357,11 +357,19 @@ impl Database {
         query.push_str(" ORDER BY p.created_at DESC");
 
         // Limit and offset
-        if let Some(limit) = filter.limit {
-            query.push_str(&format!(" LIMIT {}", limit));
-        }
-        if let Some(offset) = filter.offset {
-            query.push_str(&format!(" OFFSET {}", offset));
+        // SQLite requires LIMIT when using OFFSET, use -1 for "no limit"
+        match (filter.limit, filter.offset) {
+            (Some(limit), Some(offset)) => {
+                query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
+            }
+            (Some(limit), None) => {
+                query.push_str(&format!(" LIMIT {}", limit));
+            }
+            (None, Some(offset)) => {
+                // SQLite requires LIMIT with OFFSET; -1 means no limit
+                query.push_str(&format!(" LIMIT -1 OFFSET {}", offset));
+            }
+            (None, None) => {}
         }
 
         let mut stmt = self.conn.prepare(&query).map_err(|e| {
