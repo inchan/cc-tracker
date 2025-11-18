@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug CLI",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=prompt-tracking",
+          "--package=prompt_tracking"
+        ],
+        "filter": {
+          "name": "prompt-tracking",
+          "kind": "bin"
+        }
+      },
+      "args": ["status"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Unit Tests",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=prompt_tracking"
+        ],
+        "filter": {
+          "name": "prompt_tracking",
+          "kind": "lib"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
