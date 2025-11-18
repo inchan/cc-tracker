@@ -1,0 +1,42 @@
+# Prompt Tracking System Configuration
+
+database:
+  path: "~/.local/share/prompt-tracking/prompts.db"
+  auto_backup: true
+  backup_interval: 24  # hours
+
+capture:
+  watch_directory: "$HOME/.claude-code-data"
+  auto_capture: true
+  deduplicate: true
+  similarity_threshold: 0.95
+
+analysis:
+  auto_analyze: true
+  quality_weights:
+    clarity: 0.3
+    completeness: 0.3
+    specificity: 0.2
+    guidance: 0.2
+
+reporting:
+  auto_report: true
+  weekly:
+    enabled: true
+    day: "monday"
+    time: "09:00"
+  monthly:
+    enabled: true
+    day: 1
+    time: "09:00"
+  formats: ["markdown", "html"]
+  output_dir: "~/Documents/Prompt Reports"
+
+categories:
+  - code-generation
+  - documentation
+  - analysis
+  - testing
+  - debugging
+  - refactoring
+  - explanation

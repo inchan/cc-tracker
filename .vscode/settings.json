@@ -1,0 +1,27 @@
+{
+  "[rust]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.rulers": [100, 120]
+  },
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.checkOnSave.overrideCommand": [
+    "cargo",
+    "clippy",
+    "--workspace",
+    "--message-format=json",
+    "--all-targets",
+    "--all-features"
+  ],
+  "rust-analyzer.inlayHints.enable": true,
+  "rust-analyzer.inlayHints.typeHints.enable": true,
+  "editor.formatOnSave": true,
+  "files.exclude": {
+    "**/target": true,
+    "**/.git": true
+  },
+  "[markdown]": {
+    "editor.wordWrap": "on",
+    "editor.formatOnSave": true
+  }
+}

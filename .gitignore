@@ -1,0 +1,30 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data
+/data/database/*.db
+/data/database/*.db-journal
+/data/database/*.db-wal
+/data/database/*.db-shm
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp
