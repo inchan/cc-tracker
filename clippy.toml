@@ -1,4 +1,5 @@
 # Clippy configuration
+# Based on Rust API Guidelines and best practices
 # See: https://rust-lang.github.io/rust-clippy/
 
 # Maximum cognitive complexity allowed
@@ -12,3 +13,21 @@ too-many-arguments-threshold = 7
 
 # Minimum number of struct fields for the 'struct_excessive_bools' lint
 max-struct-bools = 3
+
+# Disallow names that are too generic
+disallowed-names = ["foo", "bar", "baz", "quux"]
+
+# MSRV (Minimum Supported Rust Version)
+msrv = "1.70"
+
+# Maximum allowed nesting for control flow
+excessive-nesting-threshold = 4
+
+# Standard library types that should not be used
+disallowed-types = []
+
+# Single character binding names to allow
+allowed-idents-below-min-chars = ["i", "j", "k", "n", "x", "y", "z", "id", "db"]
+
+# Avoid breaking exported API changes (for library)
+avoid-breaking-exported-api = true

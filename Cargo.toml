@@ -2,10 +2,28 @@
 name = "prompt_tracking"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+rust-version = "1.70"
+authors = ["Prompt Tracking Team"]
 description = "Enterprise-grade prompt tracking system for Claude Code"
-repository = "https://github.com/YOUR_USERNAME/prompt-tracking-system"
+documentation = "https://docs.rs/prompt_tracking"
+readme = "README.md"
+homepage = "https://github.com/inchan/cc-tracker"
+repository = "https://github.com/inchan/cc-tracker"
 license = "MIT"
+keywords = ["prompt", "tracking", "claude", "ai", "analysis"]
+categories = ["command-line-utilities", "database"]
+
+# Lints configuration (Rust best practices)
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
 
 [lib]
 name = "prompt_tracking"
@@ -32,7 +50,6 @@ serde_yaml = "0.9"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 regex = "1.10"
-anyhow = "1.0"
 thiserror = "1.0"
 
 # Logging
