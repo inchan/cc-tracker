@@ -12,6 +12,7 @@ use prompt_tracking::{
     database::{Database, PromptFilter},
     reporting::{build_report_data, ReportGenerator, ReportType},
     utils::truncate_string,
+    watcher::{FileWatcher, WatcherConfig},
 };
 
 #[derive(Parser)]
@@ -44,6 +45,14 @@ enum Commands {
         /// Tags for the prompt (comma-separated)
         #[arg(short, long)]
         tags: Option<String>,
+
+        /// Watch directory for new prompt files
+        #[arg(short, long)]
+        watch: bool,
+
+        /// Directory to watch (requires --watch)
+        #[arg(long)]
+        watch_dir: Option<PathBuf>,
     },
 
     /// List stored prompts
@@ -228,7 +237,15 @@ fn main() {
             file,
             category,
             tags,
-        } => cmd_capture(&db, &config, content, file, category, tags),
+            watch,
+            watch_dir,
+        } => {
+            if watch {
+                cmd_watch(&db, &config, watch_dir, category, tags)
+            } else {
+                cmd_capture(&db, &config, content, file, category, tags)
+            }
+        }
 
         Commands::List {
             limit,
@@ -943,4 +960,64 @@ fn cmd_unarchive(db: &Database, id: &str) -> Result<(), String> {
     println!("Prompt {} unarchived successfully.", id);
 
     Ok(())
+}
+
+fn cmd_watch(
+    db: &Database,
+    config: &Config,
+    watch_dir: Option<PathBuf>,
+    _category: Option<String>,
+    _tags: Option<String>,
+) -> Result<(), String> {
+    let watch_path = watch_dir
+        .unwrap_or_else(|| PathBuf::from(&config.capture.watch_directory));
+
+    let watcher_config = WatcherConfig {
+        watch_path: watch_path.clone(),
+        recursive: true,
+        file_extensions: vec!["txt".to_string(), "md".to_string(), "prompt".to_string()],
+        similarity_threshold: config.capture.similarity_threshold,
+    };
+
+    println!("Starting file watcher...");
+    println!("Watching directory: {}", watch_path.display());
+    println!("File extensions: .txt, .md, .prompt");
+    println!("Press Ctrl+C to stop.\n");
+
+    let mut watcher = FileWatcher::new(watcher_config)
+        .map_err(|e| format!("Failed to create watcher: {}", e))?;
+
+    watcher.start().map_err(|e| format!("Failed to start watcher: {}", e))?;
+
+    let quality_analyzer = QualityAnalyzer::default();
+    let efficiency_analyzer = EfficiencyAnalyzer::default();
+
+    loop {
+        let captured_ids = watcher
+            .process_events(db)
+            .map_err(|e| format!("Failed to process events: {}", e))?;
+
+        for id in captured_ids {
+            println!("Captured prompt: {}", id);
+
+            // Auto-analyze if enabled
+            if config.analysis.auto_analyze {
+                if let Ok(Some(prompt)) = db.get_prompt(&id) {
+                    if let Ok(quality) = quality_analyzer.analyze(&prompt) {
+                        if let Err(e) = db.save_quality_score(&quality) {
+                            eprintln!("Failed to save quality score: {}", e);
+                        }
+                    }
+                    if let Ok(efficiency) = efficiency_analyzer.analyze(&prompt) {
+                        if let Err(e) = db.save_efficiency_metrics(&efficiency) {
+                            eprintln!("Failed to save efficiency metrics: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sleep to avoid busy-waiting
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
