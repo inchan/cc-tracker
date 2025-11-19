@@ -34,6 +34,14 @@ analysis:
     guidance: 0.2
 reporting:
   auto_report: false
+  weekly:
+    enabled: false
+    day: "monday"
+    time: "09:00"
+  monthly:
+    enabled: false
+    day: 1
+    time: "09:00"
   formats: ["markdown"]
   output_dir: "/tmp"
 categories:
@@ -469,11 +477,12 @@ fn test_init_command() {
     let config_path = temp_dir.path().join("config.yaml");
     fs::write(&config_path, create_test_config(&db_path, false)).unwrap();
 
-    // Init
+    // Init with --force (db is created when config is loaded)
     let mut cmd = get_cmd();
     cmd.arg("--config")
         .arg(&config_path)
         .arg("init")
+        .arg("--force")
         .assert()
         .success()
         .stdout(predicate::str::contains("Database initialized"));
@@ -489,4 +498,65 @@ fn test_invalid_command() {
 fn test_missing_required_arg() {
     let mut cmd = get_cmd();
     cmd.arg("get").assert().failure();
+}
+
+#[test]
+fn test_query_command() {
+    let temp_dir = setup_test_db();
+    let db_path = temp_dir.path().join("test.db");
+    let config_path = temp_dir.path().join("config.yaml");
+    fs::write(&config_path, create_test_config(&db_path, false)).unwrap();
+
+    // Capture a prompt first
+    let mut cmd = get_cmd();
+    cmd.arg("--config")
+        .arg(&config_path)
+        .arg("capture")
+        .arg("Write a Rust function to sort vectors")
+        .arg("--category")
+        .arg("code-generation")
+        .arg("--tags")
+        .arg("rust,sorting")
+        .assert()
+        .success();
+
+    // Query by category
+    let mut cmd = get_cmd();
+    cmd.arg("--config")
+        .arg(&config_path)
+        .arg("query")
+        .arg("category:code-generation")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Found"))
+        .stdout(predicate::str::contains("prompt"));
+
+    // Query by tag
+    let mut cmd = get_cmd();
+    cmd.arg("--config")
+        .arg(&config_path)
+        .arg("query")
+        .arg("tag:rust")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Found"));
+
+    // Query with combined filters
+    let mut cmd = get_cmd();
+    cmd.arg("--config")
+        .arg(&config_path)
+        .arg("query")
+        .arg("category:code-generation tag:rust limit:5")
+        .assert()
+        .success();
+
+    // Query with no results
+    let mut cmd = get_cmd();
+    cmd.arg("--config")
+        .arg(&config_path)
+        .arg("query")
+        .arg("category:nonexistent")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No prompts found"));
 }

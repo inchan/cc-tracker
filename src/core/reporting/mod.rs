@@ -17,6 +17,7 @@ pub enum ReportFormat {
     Html,
     Json,
     Csv,
+    Pdf,
 }
 
 impl ReportFormat {
@@ -27,6 +28,7 @@ impl ReportFormat {
             ReportFormat::Html => "html",
             ReportFormat::Json => "json",
             ReportFormat::Csv => "csv",
+            ReportFormat::Pdf => "pdf",
         }
     }
 }
@@ -40,6 +42,7 @@ impl FromStr for ReportFormat {
             "html" => Ok(ReportFormat::Html),
             "json" => Ok(ReportFormat::Json),
             "csv" => Ok(ReportFormat::Csv),
+            "pdf" => Ok(ReportFormat::Pdf),
             _ => Err(format!("Invalid format: {}", s)),
         }
     }
@@ -140,30 +143,228 @@ impl ReportGenerator {
         Self { format }
     }
 
-    /// Generate report from data
+    /// Generate report from data (returns String for text formats)
     pub fn generate(&self, data: &ReportData) -> Result<String> {
         match self.format {
             ReportFormat::Markdown => self.generate_markdown(data),
             ReportFormat::Html => self.generate_html(data),
             ReportFormat::Json => self.generate_json(data),
             ReportFormat::Csv => self.generate_csv(data),
+            ReportFormat::Pdf => Err(PromptTrackingError::IoError(std::io::Error::other(
+                "PDF format requires save_to_file() method",
+            ))),
         }
+    }
+
+    /// Check if format is binary (requires different handling)
+    pub fn is_binary(&self) -> bool {
+        matches!(self.format, ReportFormat::Pdf)
     }
 
     /// Save report to file
     pub fn save_to_file(&self, data: &ReportData, path: &Path) -> Result<()> {
-        let content = self.generate(data)?;
-
         // Create parent directories if needed
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                PromptTrackingError::IoError(std::io::Error::other(
-                    format!("Failed to create directory: {}", e),
-                ))
+                PromptTrackingError::IoError(std::io::Error::other(format!(
+                    "Failed to create directory: {}",
+                    e
+                )))
             })?;
         }
 
+        // Handle PDF separately (binary format)
+        if matches!(self.format, ReportFormat::Pdf) {
+            return self.save_pdf(data, path);
+        }
+
+        // Text formats
+        let content = self.generate(data)?;
         std::fs::write(path, content).map_err(PromptTrackingError::IoError)?;
+        Ok(())
+    }
+
+    /// Save PDF report to file
+    fn save_pdf(&self, data: &ReportData, path: &Path) -> Result<()> {
+        use printpdf::*;
+
+        // Create PDF document
+        let (doc, page1, layer1) = PdfDocument::new(&data.title, Mm(210.0), Mm(297.0), "Layer 1");
+        let current_layer = doc.get_page(page1).get_layer(layer1);
+
+        // Load built-in font
+        let font = doc.add_builtin_font(BuiltinFont::Helvetica).map_err(|e| {
+            PromptTrackingError::IoError(std::io::Error::other(format!(
+                "Failed to add font: {}",
+                e
+            )))
+        })?;
+
+        let font_bold = doc
+            .add_builtin_font(BuiltinFont::HelveticaBold)
+            .map_err(|e| {
+                PromptTrackingError::IoError(std::io::Error::other(format!(
+                    "Failed to add font: {}",
+                    e
+                )))
+            })?;
+
+        let mut y_position = 280.0;
+        let x_margin = 20.0;
+        let line_height = 6.0;
+
+        // Title
+        current_layer.use_text(&data.title, 18.0, Mm(x_margin), Mm(y_position), &font_bold);
+        y_position -= 10.0;
+
+        // Generated date
+        current_layer.use_text(
+            &format!(
+                "Generated: {}",
+                data.generated_at.format("%Y-%m-%d %H:%M UTC")
+            ),
+            10.0,
+            Mm(x_margin),
+            Mm(y_position),
+            &font,
+        );
+        y_position -= line_height;
+
+        // Period
+        current_layer.use_text(
+            &format!(
+                "Period: {} to {}",
+                data.period_start.format("%Y-%m-%d"),
+                data.period_end.format("%Y-%m-%d")
+            ),
+            10.0,
+            Mm(x_margin),
+            Mm(y_position),
+            &font,
+        );
+        y_position -= 12.0;
+
+        // Summary section
+        current_layer.use_text("Summary", 14.0, Mm(x_margin), Mm(y_position), &font_bold);
+        y_position -= 8.0;
+
+        let summary_items = [
+            format!("Total Prompts: {}", data.summary.total_prompts),
+            format!("New Prompts: {}", data.summary.new_prompts),
+            format!(
+                "Average Quality Score: {:.1}",
+                data.summary.avg_quality_score
+            ),
+            format!(
+                "Average Efficiency Score: {:.1}",
+                data.summary.avg_efficiency_score
+            ),
+            format!("Total Tokens Used: {}", data.summary.total_tokens_used),
+            format!("Total Cost: ${:.4}", data.summary.total_cost),
+        ];
+
+        for item in &summary_items {
+            current_layer.use_text(item, 10.0, Mm(x_margin + 5.0), Mm(y_position), &font);
+            y_position -= line_height;
+        }
+        y_position -= 6.0;
+
+        // Quality Breakdown
+        current_layer.use_text(
+            "Quality Breakdown",
+            14.0,
+            Mm(x_margin),
+            Mm(y_position),
+            &font_bold,
+        );
+        y_position -= 8.0;
+
+        let quality_items = [
+            format!("Clarity: {:.1}", data.quality_breakdown.avg_clarity),
+            format!(
+                "Completeness: {:.1}",
+                data.quality_breakdown.avg_completeness
+            ),
+            format!(
+                "Specificity: {:.1}",
+                data.quality_breakdown.avg_specificity
+            ),
+            format!("Guidance: {:.1}", data.quality_breakdown.avg_guidance),
+        ];
+
+        for item in &quality_items {
+            current_layer.use_text(item, 10.0, Mm(x_margin + 5.0), Mm(y_position), &font);
+            y_position -= line_height;
+        }
+        y_position -= 6.0;
+
+        // Efficiency Breakdown
+        current_layer.use_text(
+            "Efficiency Breakdown",
+            14.0,
+            Mm(x_margin),
+            Mm(y_position),
+            &font_bold,
+        );
+        y_position -= 8.0;
+
+        let efficiency_items = [
+            format!(
+                "Token Efficiency: {:.1}",
+                data.efficiency_breakdown.avg_token_efficiency
+            ),
+            format!(
+                "Time Efficiency: {:.1}",
+                data.efficiency_breakdown.avg_time_efficiency
+            ),
+            format!(
+                "Cost Efficiency: {:.1}",
+                data.efficiency_breakdown.avg_cost_efficiency
+            ),
+        ];
+
+        for item in &efficiency_items {
+            current_layer.use_text(item, 10.0, Mm(x_margin + 5.0), Mm(y_position), &font);
+            y_position -= line_height;
+        }
+        y_position -= 6.0;
+
+        // Category stats (if any)
+        if !data.category_stats.is_empty() {
+            current_layer.use_text(
+                "Categories",
+                14.0,
+                Mm(x_margin),
+                Mm(y_position),
+                &font_bold,
+            );
+            y_position -= 8.0;
+
+            for stat in &data.category_stats {
+                let text = format!(
+                    "{}: {} prompts, avg quality {:.1}",
+                    stat.name, stat.count, stat.avg_quality
+                );
+                current_layer.use_text(&text, 10.0, Mm(x_margin + 5.0), Mm(y_position), &font);
+                y_position -= line_height;
+
+                // Check if we need a new page
+                if y_position < 20.0 {
+                    break;
+                }
+            }
+        }
+
+        // Save to file
+        let file = std::fs::File::create(path).map_err(PromptTrackingError::IoError)?;
+        let mut buf_writer = std::io::BufWriter::new(file);
+        doc.save(&mut buf_writer).map_err(|e| {
+            PromptTrackingError::IoError(std::io::Error::other(format!(
+                "Failed to save PDF: {}",
+                e
+            )))
+        })?;
+
         Ok(())
     }
 

@@ -5,6 +5,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Result as SqliteResult};
 use std::path::Path;
 
+use crate::migration::MigrationManager;
 use crate::models::{EfficiencyMetrics, Prompt, PromptMetadata, PromptStatus, QualityScore};
 use crate::{PromptTrackingError, Result};
 
@@ -82,93 +83,22 @@ impl Database {
         Ok(db)
     }
 
-    /// Initialize database schema
+    /// Initialize database schema using migrations
     fn initialize_schema(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                r#"
-            -- Prompts table
-            CREATE TABLE IF NOT EXISTS prompts (
-                id TEXT PRIMARY KEY,
-                content TEXT NOT NULL,
-                content_hash TEXT NOT NULL,
-                category TEXT,
-                status TEXT NOT NULL DEFAULT 'active',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                model TEXT NOT NULL,
-                input_tokens INTEGER,
-                output_tokens INTEGER,
-                execution_time_ms INTEGER,
-                estimated_cost REAL,
-                context TEXT
-            );
+        let manager = MigrationManager::new(&self.conn);
+        manager.run_migrations()
+    }
 
-            -- Tags table
-            CREATE TABLE IF NOT EXISTS tags (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL
-            );
+    /// Check if database needs migration
+    pub fn needs_migration(&self) -> Result<bool> {
+        let manager = MigrationManager::new(&self.conn);
+        manager.needs_migration()
+    }
 
-            -- Prompt-Tags junction table
-            CREATE TABLE IF NOT EXISTS prompt_tags (
-                prompt_id TEXT NOT NULL,
-                tag_id INTEGER NOT NULL,
-                PRIMARY KEY (prompt_id, tag_id),
-                FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE,
-                FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-            );
-
-            -- Quality scores table
-            CREATE TABLE IF NOT EXISTS quality_scores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                prompt_id TEXT NOT NULL,
-                total_score REAL NOT NULL,
-                clarity REAL NOT NULL,
-                completeness REAL NOT NULL,
-                specificity REAL NOT NULL,
-                guidance REAL NOT NULL,
-                analyzed_at TEXT NOT NULL,
-                FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
-            );
-
-            -- Efficiency metrics table
-            CREATE TABLE IF NOT EXISTS efficiency_metrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                prompt_id TEXT NOT NULL,
-                efficiency_score REAL NOT NULL,
-                token_efficiency REAL NOT NULL,
-                time_efficiency REAL NOT NULL,
-                cost_efficiency REAL NOT NULL,
-                calculated_at TEXT NOT NULL,
-                FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
-            );
-
-            -- Version history table
-            CREATE TABLE IF NOT EXISTS version_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                prompt_id TEXT NOT NULL,
-                content TEXT NOT NULL,
-                content_hash TEXT NOT NULL,
-                version INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
-            );
-
-            -- Indexes for performance
-            CREATE INDEX IF NOT EXISTS idx_prompts_created_at ON prompts(created_at);
-            CREATE INDEX IF NOT EXISTS idx_prompts_category ON prompts(category);
-            CREATE INDEX IF NOT EXISTS idx_prompts_content_hash ON prompts(content_hash);
-            CREATE INDEX IF NOT EXISTS idx_quality_scores_prompt_id ON quality_scores(prompt_id);
-            CREATE INDEX IF NOT EXISTS idx_efficiency_metrics_prompt_id ON efficiency_metrics(prompt_id);
-            CREATE INDEX IF NOT EXISTS idx_version_history_prompt_id ON version_history(prompt_id);
-            "#,
-            )
-            .map_err(|e| {
-                PromptTrackingError::DatabaseError(format!("Failed to initialize schema: {}", e))
-            })?;
-
-        Ok(())
+    /// Get migration history
+    pub fn get_migration_history(&self) -> Result<Vec<(i32, String)>> {
+        let manager = MigrationManager::new(&self.conn);
+        manager.get_migration_history()
     }
 
     /// Create a new prompt

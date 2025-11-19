@@ -281,6 +281,30 @@ fn test_report_all_formats() {
 }
 
 #[test]
+fn test_report_pdf_format() {
+    use tempfile::TempDir;
+
+    let data = build_report_data(ReportType::Weekly, &[], &[], &[]);
+    let generator = ReportGenerator::new(ReportFormat::Pdf);
+
+    // PDF should error on generate() as it requires save_to_file()
+    let result = generator.generate(&data);
+    assert!(result.is_err());
+
+    // PDF should work with save_to_file()
+    let temp_dir = TempDir::new().unwrap();
+    let pdf_path = temp_dir.path().join("test_report.pdf");
+
+    let result = generator.save_to_file(&data, &pdf_path);
+    assert!(result.is_ok());
+    assert!(pdf_path.exists());
+
+    // Check file has content
+    let metadata = std::fs::metadata(&pdf_path).unwrap();
+    assert!(metadata.len() > 0);
+}
+
+#[test]
 fn test_report_format_from_str_case_insensitive() {
     assert!("MARKDOWN".parse::<ReportFormat>().is_ok());
     assert!("HTML".parse::<ReportFormat>().is_ok());

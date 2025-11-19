@@ -10,6 +10,7 @@ use prompt_tracking::{
     capture::CaptureService,
     config::Config,
     database::{Database, PromptFilter},
+    filter::parse_filter_query,
     reporting::{build_report_data, ReportGenerator, ReportType},
     utils::truncate_string,
     watcher::{FileWatcher, WatcherConfig},
@@ -203,6 +204,14 @@ enum Commands {
         /// Prompt ID to unarchive
         id: String,
     },
+
+    /// Query prompts with advanced filter syntax
+    ///
+    /// Supports filters like: category:code tag:rust quality:>80 date:>2024-01-01
+    Query {
+        /// Filter query string (e.g., "category:code tag:rust quality:>80")
+        query: String,
+    },
 }
 
 fn main() {
@@ -295,6 +304,8 @@ fn main() {
         Commands::Archive { id } => cmd_archive(&db, &id),
 
         Commands::Unarchive { id } => cmd_unarchive(&db, &id),
+
+        Commands::Query { query } => cmd_query(&db, &query),
     };
 
     if let Err(e) = result {
@@ -1020,4 +1031,52 @@ fn cmd_watch(
         // Sleep to avoid busy-waiting
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+}
+
+fn cmd_query(db: &Database, query: &str) -> Result<(), String> {
+    // Parse the advanced filter query
+    let filter = parse_filter_query(query)
+        .map_err(|e| format!("Failed to parse query: {}", e))?;
+
+    // Query prompts
+    let prompts = db
+        .list_prompts(&filter)
+        .map_err(|e| format!("Failed to query prompts: {}", e))?;
+
+    if prompts.is_empty() {
+        println!("No prompts found matching query.");
+        return Ok(());
+    }
+
+    println!("Found {} prompt(s):\n", prompts.len());
+
+    for prompt in prompts {
+        // Get quality score if available
+        let quality = db.get_quality_score(&prompt.id).ok().flatten();
+
+        println!("ID: {}", prompt.id);
+        println!("Created: {}", prompt.created_at.format("%Y-%m-%d %H:%M"));
+        println!(
+            "Content: {}",
+            truncate_string(&prompt.content.replace('\n', " "), 100)
+        );
+
+        if let Some(category) = &prompt.category {
+            println!("Category: {}", category);
+        }
+
+        if !prompt.tags.is_empty() {
+            println!("Tags: {}", prompt.tags.join(", "));
+        }
+
+        println!("Status: {}", prompt.status);
+
+        if let Some(q) = quality {
+            println!("Quality: {:.1}", q.total_score);
+        }
+
+        println!("{}", "-".repeat(50));
+    }
+
+    Ok(())
 }
