@@ -5,7 +5,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Result as SqliteResult};
 use std::path::Path;
 
-use crate::models::{EfficiencyMetrics, Prompt, PromptMetadata, QualityScore};
+use crate::models::{EfficiencyMetrics, Prompt, PromptMetadata, PromptStatus, QualityScore};
 use crate::{PromptTrackingError, Result};
 
 /// Database manager for prompt storage
@@ -20,6 +20,7 @@ use chrono::{DateTime, Utc};
 pub struct PromptFilter {
     pub category: Option<String>,
     pub tags: Vec<String>,
+    pub status: Option<PromptStatus>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub search_query: Option<String>,
@@ -92,6 +93,7 @@ impl Database {
                 content TEXT NOT NULL,
                 content_hash TEXT NOT NULL,
                 category TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 model TEXT NOT NULL,
@@ -175,15 +177,16 @@ impl Database {
             .execute(
                 r#"
             INSERT INTO prompts (
-                id, content, content_hash, category, created_at, updated_at,
+                id, content, content_hash, category, status, created_at, updated_at,
                 model, input_tokens, output_tokens, execution_time_ms, estimated_cost, context
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
                 params![
                     prompt.id,
                     prompt.content,
                     prompt.content_hash,
                     prompt.category,
+                    prompt.status.to_string(),
                     prompt.created_at.to_rfc3339(),
                     prompt.updated_at.to_rfc3339(),
                     prompt.metadata.model,
@@ -212,7 +215,7 @@ impl Database {
             .conn
             .prepare(
                 r#"
-            SELECT id, content, content_hash, category, created_at, updated_at,
+            SELECT id, content, content_hash, category, status, created_at, updated_at,
                    model, input_tokens, output_tokens, execution_time_ms, estimated_cost, context
             FROM prompts WHERE id = ?1
             "#,
@@ -245,9 +248,9 @@ impl Database {
             .execute(
                 r#"
             UPDATE prompts SET
-                content = ?2, content_hash = ?3, category = ?4, updated_at = ?5,
-                model = ?6, input_tokens = ?7, output_tokens = ?8,
-                execution_time_ms = ?9, estimated_cost = ?10, context = ?11
+                content = ?2, content_hash = ?3, category = ?4, status = ?5, updated_at = ?6,
+                model = ?7, input_tokens = ?8, output_tokens = ?9,
+                execution_time_ms = ?10, estimated_cost = ?11, context = ?12
             WHERE id = ?1
             "#,
                 params![
@@ -255,6 +258,7 @@ impl Database {
                     prompt.content,
                     prompt.content_hash,
                     prompt.category,
+                    prompt.status.to_string(),
                     prompt.updated_at.to_rfc3339(),
                     prompt.metadata.model,
                     prompt.metadata.input_tokens,
@@ -292,7 +296,7 @@ impl Database {
     pub fn list_prompts(&self, filter: &PromptFilter) -> Result<Vec<Prompt>> {
         let mut query = String::from(
             r#"
-            SELECT DISTINCT p.id, p.content, p.content_hash, p.category, p.created_at, p.updated_at,
+            SELECT DISTINCT p.id, p.content, p.content_hash, p.category, p.status, p.created_at, p.updated_at,
                    p.model, p.input_tokens, p.output_tokens, p.execution_time_ms, p.estimated_cost, p.context
             FROM prompts p
             "#,
@@ -345,6 +349,12 @@ impl Database {
         if let Some(ref date_to) = filter.date_to {
             conditions.push(format!("p.created_at <= ?{}", params_vec.len() + 1));
             params_vec.push(Box::new(date_to.to_rfc3339()));
+        }
+
+        // Status filter
+        if let Some(ref status) = filter.status {
+            conditions.push(format!("p.status = ?{}", params_vec.len() + 1));
+            params_vec.push(Box::new(status.to_string()));
         }
 
         // Add WHERE clause if there are conditions
@@ -415,7 +425,7 @@ impl Database {
             .conn
             .prepare(
                 r#"
-            SELECT id, content, content_hash, category, created_at, updated_at,
+            SELECT id, content, content_hash, category, status, created_at, updated_at,
                    model, input_tokens, output_tokens, execution_time_ms, estimated_cost, context
             FROM prompts WHERE content_hash = ?1
             "#,
@@ -449,6 +459,44 @@ impl Database {
             })?;
 
         Ok(count as usize)
+    }
+
+    /// Archive a prompt
+    pub fn archive_prompt(&self, id: &str) -> Result<()> {
+        let rows = self
+            .conn
+            .execute(
+                "UPDATE prompts SET status = 'archived', updated_at = ?2 WHERE id = ?1",
+                params![id, Utc::now().to_rfc3339()],
+            )
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to archive prompt: {}", e))
+            })?;
+
+        if rows == 0 {
+            return Err(PromptTrackingError::DatabaseError(format!("Prompt not found: {}", id)));
+        }
+
+        Ok(())
+    }
+
+    /// Unarchive a prompt (set status back to active)
+    pub fn unarchive_prompt(&self, id: &str) -> Result<()> {
+        let rows = self
+            .conn
+            .execute(
+                "UPDATE prompts SET status = 'active', updated_at = ?2 WHERE id = ?1",
+                params![id, Utc::now().to_rfc3339()],
+            )
+            .map_err(|e| {
+                PromptTrackingError::DatabaseError(format!("Failed to unarchive prompt: {}", e))
+            })?;
+
+        if rows == 0 {
+            return Err(PromptTrackingError::DatabaseError(format!("Prompt not found: {}", id)));
+        }
+
+        Ok(())
     }
 
     /// Save quality score for a prompt
@@ -614,25 +662,27 @@ impl Database {
     // Helper methods
 
     fn row_to_prompt(&self, row: &rusqlite::Row) -> SqliteResult<Prompt> {
+        let status_str: String = row.get::<_, Option<String>>(4)?.unwrap_or_else(|| "active".to_string());
         Ok(Prompt {
             id: row.get(0)?,
             content: row.get(1)?,
             content_hash: row.get(2)?,
             category: row.get(3)?,
-            created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+            status: PromptStatus::from_str(&status_str).unwrap_or(PromptStatus::Active),
+            created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
                 .map(|dt| dt.with_timezone(&chrono::Utc))
                 .unwrap_or_else(|_| chrono::Utc::now()),
-            updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+            updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(6)?)
                 .map(|dt| dt.with_timezone(&chrono::Utc))
                 .unwrap_or_else(|_| chrono::Utc::now()),
             tags: Vec::new(), // Will be populated separately
             metadata: PromptMetadata {
-                model: row.get(6)?,
-                input_tokens: row.get(7)?,
-                output_tokens: row.get(8)?,
-                execution_time_ms: row.get::<_, Option<i64>>(9)?.map(|v| v as u64),
-                estimated_cost: row.get(10)?,
-                context: row.get(11)?,
+                model: row.get(7)?,
+                input_tokens: row.get(8)?,
+                output_tokens: row.get(9)?,
+                execution_time_ms: row.get::<_, Option<i64>>(10)?.map(|v| v as u64),
+                estimated_cost: row.get(11)?,
+                context: row.get(12)?,
             },
         })
     }

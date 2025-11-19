@@ -106,6 +106,94 @@ enum Commands {
         /// Prompt ID to delete
         id: String,
     },
+
+    /// Update a prompt
+    Update {
+        /// Prompt ID to update
+        id: String,
+
+        /// New category
+        #[arg(short, long)]
+        category: Option<String>,
+
+        /// New content
+        #[arg(long)]
+        content: Option<String>,
+
+        /// Add tags (comma-separated)
+        #[arg(short, long)]
+        tags: Option<String>,
+
+        /// New context
+        #[arg(long)]
+        context: Option<String>,
+    },
+
+    /// Show version history of a prompt
+    History {
+        /// Prompt ID
+        id: String,
+    },
+
+    /// Revert prompt to a previous version
+    Revert {
+        /// Prompt ID
+        id: String,
+
+        /// Version number to revert to
+        #[arg(short, long)]
+        to: i32,
+    },
+
+    /// Show trends and statistics
+    Trends {
+        /// Number of days to analyze
+        #[arg(short, long, default_value = "30")]
+        days: i32,
+
+        /// Show category distribution
+        #[arg(long)]
+        categories: bool,
+    },
+
+    /// Export data to file
+    Export {
+        /// Output file path
+        output: PathBuf,
+
+        /// Export format (json)
+        #[arg(short, long, default_value = "json")]
+        format: String,
+    },
+
+    /// Import data from file
+    Import {
+        /// Input file path
+        input: PathBuf,
+
+        /// Skip duplicates
+        #[arg(long)]
+        skip_duplicates: bool,
+    },
+
+    /// Initialize database and configuration
+    Init {
+        /// Force re-initialization
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Archive a prompt
+    Archive {
+        /// Prompt ID to archive
+        id: String,
+    },
+
+    /// Unarchive a prompt
+    Unarchive {
+        /// Prompt ID to unarchive
+        id: String,
+    },
 }
 
 fn main() {
@@ -163,6 +251,33 @@ fn main() {
         Commands::Status => cmd_status(&db),
 
         Commands::Delete { id } => cmd_delete(&db, &id),
+
+        Commands::Update {
+            id,
+            category,
+            content,
+            tags,
+            context,
+        } => cmd_update(&db, &id, category, content, tags, context),
+
+        Commands::History { id } => cmd_history(&db, &id),
+
+        Commands::Revert { id, to } => cmd_revert(&db, &id, to),
+
+        Commands::Trends { days, categories } => cmd_trends(&db, days, categories),
+
+        Commands::Export { output, format } => cmd_export(&db, &output, &format),
+
+        Commands::Import {
+            input,
+            skip_duplicates,
+        } => cmd_import(&db, &input, skip_duplicates),
+
+        Commands::Init { force } => cmd_init(&config, force),
+
+        Commands::Archive { id } => cmd_archive(&db, &id),
+
+        Commands::Unarchive { id } => cmd_unarchive(&db, &id),
     };
 
     if let Err(e) = result {
@@ -586,6 +701,245 @@ fn cmd_delete(db: &Database, id: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to delete prompt: {}", e))?;
 
     println!("Prompt {} deleted successfully.", id);
+
+    Ok(())
+}
+
+fn cmd_update(
+    db: &Database,
+    id: &str,
+    category: Option<String>,
+    content: Option<String>,
+    tags: Option<String>,
+    context: Option<String>,
+) -> Result<(), String> {
+    // Get existing prompt
+    let mut prompt = db
+        .get_prompt(id)
+        .map_err(|e| format!("Failed to get prompt: {}", e))?
+        .ok_or_else(|| format!("Prompt not found: {}", id))?;
+
+    // Save current version before updating
+    db.save_version(&prompt)
+        .map_err(|e| format!("Failed to save version: {}", e))?;
+
+    let mut updated = false;
+
+    // Update fields if provided
+    if let Some(cat) = category {
+        prompt.category = Some(cat);
+        updated = true;
+    }
+
+    if let Some(new_content) = content {
+        prompt.content = new_content;
+        prompt.content_hash = prompt_tracking::utils::calculate_hash(&prompt.content);
+        updated = true;
+    }
+
+    if let Some(tag_str) = tags {
+        let new_tags: Vec<String> = tag_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        prompt.tags.extend(new_tags);
+        updated = true;
+    }
+
+    if let Some(ctx) = context {
+        prompt.metadata.context = Some(ctx);
+        updated = true;
+    }
+
+    if !updated {
+        return Err("No updates specified. Use --category, --content, --tags, or --context.".to_string());
+    }
+
+    // Update in database
+    db.update_prompt(&prompt)
+        .map_err(|e| format!("Failed to update prompt: {}", e))?;
+
+    println!("Prompt {} updated successfully.", id);
+
+    Ok(())
+}
+
+fn cmd_history(db: &Database, id: &str) -> Result<(), String> {
+    // Check if prompt exists
+    let _ = db
+        .get_prompt(id)
+        .map_err(|e| format!("Failed to get prompt: {}", e))?
+        .ok_or_else(|| format!("Prompt not found: {}", id))?;
+
+    let history = db
+        .get_version_history(id)
+        .map_err(|e| format!("Failed to get history: {}", e))?;
+
+    if history.is_empty() {
+        println!("No version history for prompt {}.", id);
+        return Ok(());
+    }
+
+    println!("Version history for {}:\n", id);
+    println!("{:<8} {:<25} {}", "Version", "Created At", "Preview");
+    println!("{}", "-".repeat(80));
+
+    for vh in history {
+        let preview = truncate_string(&vh.content, 40);
+        println!("{:<8} {:<25} {}", vh.version, vh.created_at.format("%Y-%m-%d %H:%M:%S"), preview);
+    }
+
+    Ok(())
+}
+
+fn cmd_revert(db: &Database, id: &str, version: i32) -> Result<(), String> {
+    // Check if prompt exists
+    let _ = db
+        .get_prompt(id)
+        .map_err(|e| format!("Failed to get prompt: {}", e))?
+        .ok_or_else(|| format!("Prompt not found: {}", id))?;
+
+    db.restore_version(id, version)
+        .map_err(|e| format!("Failed to revert: {}", e))?;
+
+    println!("Prompt {} reverted to version {}.", id, version);
+
+    Ok(())
+}
+
+fn cmd_trends(db: &Database, days: i32, show_categories: bool) -> Result<(), String> {
+    if show_categories {
+        // Show category distribution
+        let distribution = db
+            .get_category_distribution()
+            .map_err(|e| format!("Failed to get distribution: {}", e))?;
+
+        if distribution.is_empty() {
+            println!("No data available for category distribution.");
+            return Ok(());
+        }
+
+        println!("Category Distribution:\n");
+        println!("{:<20} {:<10} {}", "Category", "Count", "Bar");
+        println!("{}", "-".repeat(60));
+
+        let max_count = distribution.iter().map(|(_, c)| *c).max().unwrap_or(1) as f64;
+
+        for (category, count) in distribution {
+            let bar_len = ((count as f64 / max_count) * 30.0) as usize;
+            let bar = "█".repeat(bar_len);
+            println!("{:<20} {:<10} {}", category, count, bar);
+        }
+    } else {
+        // Show daily trends
+        let trends = db
+            .get_daily_trends(days)
+            .map_err(|e| format!("Failed to get trends: {}", e))?;
+
+        if trends.is_empty() {
+            println!("No data available for the last {} days.", days);
+            return Ok(());
+        }
+
+        println!("Daily Trends (last {} days):\n", days);
+        println!("{:<12} {:<8} {:<15} {:<15}", "Date", "Count", "Avg Quality", "Avg Efficiency");
+        println!("{}", "-".repeat(55));
+
+        for trend in trends {
+            println!(
+                "{:<12} {:<8} {:<15.1} {:<15.1}",
+                trend.date, trend.count, trend.avg_quality, trend.avg_efficiency
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_export(db: &Database, output: &PathBuf, format: &str) -> Result<(), String> {
+    match format.to_lowercase().as_str() {
+        "json" => {
+            let json_str = db
+                .export_to_json()
+                .map_err(|e| format!("Failed to export: {}", e))?;
+
+            std::fs::write(output, json_str)
+                .map_err(|e| format!("Failed to write file: {}", e))?;
+
+            println!("Data exported to: {}", output.display());
+        }
+        _ => {
+            return Err(format!("Unsupported export format: {}. Use 'json'.", format));
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_import(db: &Database, input: &PathBuf, _skip_duplicates: bool) -> Result<(), String> {
+    let json_str = std::fs::read_to_string(input)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let imported = db
+        .import_from_json(&json_str)
+        .map_err(|e| format!("Failed to import: {}", e))?;
+
+    println!("Successfully imported {} prompts from: {}", imported, input.display());
+
+    Ok(())
+}
+
+fn cmd_init(config: &Config, force: bool) -> Result<(), String> {
+    let db_path = std::path::Path::new(&config.database.path);
+
+    if db_path.exists() && !force {
+        return Err(format!(
+            "Database already exists at {}. Use --force to reinitialize.",
+            config.database.path
+        ));
+    }
+
+    // Create parent directories if needed
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+
+    // Remove existing database if force
+    if db_path.exists() && force {
+        std::fs::remove_file(db_path)
+            .map_err(|e| format!("Failed to remove existing database: {}", e))?;
+    }
+
+    // Initialize new database
+    let _db = Database::new(&config.database.path)
+        .map_err(|e| format!("Failed to initialize database: {}", e))?;
+
+    println!("Database initialized at: {}", config.database.path);
+    println!("Configuration loaded from defaults.");
+    println!("\nYou can now use:");
+    println!("  prompt-tracking capture \"Your prompt\"");
+    println!("  prompt-tracking list");
+    println!("  prompt-tracking status");
+
+    Ok(())
+}
+
+fn cmd_archive(db: &Database, id: &str) -> Result<(), String> {
+    db.archive_prompt(id)
+        .map_err(|e| format!("Failed to archive prompt: {}", e))?;
+
+    println!("Prompt {} archived successfully.", id);
+
+    Ok(())
+}
+
+fn cmd_unarchive(db: &Database, id: &str) -> Result<(), String> {
+    db.unarchive_prompt(id)
+        .map_err(|e| format!("Failed to unarchive prompt: {}", e))?;
+
+    println!("Prompt {} unarchived successfully.", id);
 
     Ok(())
 }
