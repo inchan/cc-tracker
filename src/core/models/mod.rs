@@ -2,7 +2,41 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
+
+/// Status of a prompt
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum PromptStatus {
+    #[default]
+    Active,
+    Archived,
+    Deprecated,
+}
+
+impl fmt::Display for PromptStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PromptStatus::Active => write!(f, "active"),
+            PromptStatus::Archived => write!(f, "archived"),
+            PromptStatus::Deprecated => write!(f, "deprecated"),
+        }
+    }
+}
+
+impl FromStr for PromptStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "active" => Ok(Self::Active),
+            "archived" => Ok(Self::Archived),
+            "deprecated" => Ok(Self::Deprecated),
+            _ => Err(format!("Invalid status: {}", s)),
+        }
+    }
+}
 
 /// Represents a captured prompt with metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12,6 +46,7 @@ pub struct Prompt {
     pub content_hash: String,
     pub category: Option<String>,
     pub tags: Vec<String>,
+    pub status: PromptStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub metadata: PromptMetadata,
@@ -61,6 +96,7 @@ impl Prompt {
             content,
             category: None,
             tags: Vec::new(),
+            status: PromptStatus::default(),
             created_at: now,
             updated_at: now,
             metadata: PromptMetadata::default(),

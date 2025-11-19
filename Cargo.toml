@@ -48,10 +48,20 @@ sha2 = "0.10"
 
 # Directory paths
 dirs = "5.0"
+shellexpand = "3.1"
+
+# PDF generation
+printpdf = "0.7"
 
 [dev-dependencies]
 criterion = "0.5"
 tempfile = "3.8"
+assert_cmd = "2.0"
+predicates = "3.0"
+
+[[bench]]
+name = "benchmarks"
+harness = false
 
 [profile.release]
 opt-level = 3
