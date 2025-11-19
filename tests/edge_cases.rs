@@ -282,10 +282,10 @@ fn test_report_all_formats() {
 
 #[test]
 fn test_report_format_from_str_case_insensitive() {
-    assert!(ReportFormat::from_str("MARKDOWN").is_some());
-    assert!(ReportFormat::from_str("HTML").is_some());
-    assert!(ReportFormat::from_str("Json").is_some());
-    assert!(ReportFormat::from_str("MD").is_some());
+    assert!("MARKDOWN".parse::<ReportFormat>().is_ok());
+    assert!("HTML".parse::<ReportFormat>().is_ok());
+    assert!("Json".parse::<ReportFormat>().is_ok());
+    assert!("MD".parse::<ReportFormat>().is_ok());
 }
 
 // === Config Tests ===

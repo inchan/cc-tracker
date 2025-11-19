@@ -10,7 +10,7 @@ use prompt_tracking::{
     capture::CaptureService,
     config::Config,
     database::{Database, PromptFilter},
-    reporting::{build_report_data, ReportFormat, ReportGenerator, ReportType},
+    reporting::{build_report_data, ReportGenerator, ReportType},
     utils::truncate_string,
 };
 
@@ -569,8 +569,9 @@ fn cmd_report(
     };
 
     // Parse format
-    let rformat = ReportFormat::from_str(format)
-        .ok_or_else(|| format!("Invalid format: {}. Use 'markdown', 'html', 'json', or 'csv'.", format))?;
+    let rformat = format
+        .parse()
+        .map_err(|_| format!("Invalid format: {}. Use 'markdown', 'html', 'json', or 'csv'.", format))?;
 
     // Get all data
     let prompts = db

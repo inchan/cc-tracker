@@ -12,10 +12,13 @@ use prompt_tracking::{
 
 /// Benchmark hash calculation
 fn bench_hash(c: &mut Criterion) {
+    let medium = "Medium length prompt content. ".repeat(10);
+    let large = "Large prompt with lots of content for testing performance. ".repeat(100);
+
     let contents = vec![
         ("small", "Short prompt content"),
-        ("medium", &"Medium length prompt content. ".repeat(10)),
-        ("large", &"Large prompt with lots of content for testing performance. ".repeat(100)),
+        ("medium", medium.as_str()),
+        ("large", large.as_str()),
     ];
 
     let mut group = c.benchmark_group("hash_calculation");
@@ -45,10 +48,12 @@ fn bench_normalize(c: &mut Criterion) {
 /// Benchmark prompt capture
 fn bench_capture(c: &mut Criterion) {
     let service = CaptureService::default();
+    let complex = "Context: Building a REST API. Create a Python function that validates user input. Must handle null values. Return JSON format with error messages. Include tests.".to_string();
+
     let contents = vec![
         ("simple", "Write a function"),
         ("detailed", "Write a Rust function that implements a binary search tree with insert, delete, and search operations. Include proper error handling and documentation."),
-        ("complex", &"Context: Building a REST API. Create a Python function that validates user input. Must handle null values. Return JSON format with error messages. Include tests.".to_string()),
+        ("complex", complex.as_str()),
     ];
 
     let mut group = c.benchmark_group("capture_service");

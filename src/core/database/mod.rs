@@ -668,7 +668,7 @@ impl Database {
             content: row.get(1)?,
             content_hash: row.get(2)?,
             category: row.get(3)?,
-            status: PromptStatus::from_str(&status_str).unwrap_or(PromptStatus::Active),
+            status: status_str.parse().unwrap_or(PromptStatus::Active),
             created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
                 .map(|dt| dt.with_timezone(&chrono::Utc))
                 .unwrap_or_else(|_| chrono::Utc::now()),

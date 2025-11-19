@@ -3,20 +3,16 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// Status of a prompt
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum PromptStatus {
+    #[default]
     Active,
     Archived,
     Deprecated,
-}
-
-impl Default for PromptStatus {
-    fn default() -> Self {
-        Self::Active
-    }
 }
 
 impl fmt::Display for PromptStatus {
@@ -29,13 +25,15 @@ impl fmt::Display for PromptStatus {
     }
 }
 
-impl PromptStatus {
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for PromptStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "active" => Some(Self::Active),
-            "archived" => Some(Self::Archived),
-            "deprecated" => Some(Self::Deprecated),
-            _ => None,
+            "active" => Ok(Self::Active),
+            "archived" => Ok(Self::Archived),
+            "deprecated" => Ok(Self::Deprecated),
+            _ => Err(format!("Invalid status: {}", s)),
         }
     }
 }

@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::str::FromStr;
 
 use crate::models::{EfficiencyMetrics, Prompt, QualityScore};
 use crate::{PromptTrackingError, Result};
@@ -28,15 +29,18 @@ impl ReportFormat {
             ReportFormat::Csv => "csv",
         }
     }
+}
 
-    /// Parse format from string
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for ReportFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "markdown" | "md" => Some(ReportFormat::Markdown),
-            "html" => Some(ReportFormat::Html),
-            "json" => Some(ReportFormat::Json),
-            "csv" => Some(ReportFormat::Csv),
-            _ => None,
+            "markdown" | "md" => Ok(ReportFormat::Markdown),
+            "html" => Ok(ReportFormat::Html),
+            "json" => Ok(ReportFormat::Json),
+            "csv" => Ok(ReportFormat::Csv),
+            _ => Err(format!("Invalid format: {}", s)),
         }
     }
 }
@@ -579,19 +583,19 @@ pub fn build_report_data(
     // Top prompts (by quality score)
     let mut top_prompts: Vec<PromptSummary> = prompts
         .iter()
-        .filter_map(|p| {
+        .map(|p| {
             let quality = quality_map.get(&p.id).map(|s| s.total_score).unwrap_or(0.0);
             let efficiency = efficiency_map
                 .get(&p.id)
                 .map(|m| m.efficiency_score)
                 .unwrap_or(0.0);
-            Some(PromptSummary {
+            PromptSummary {
                 id: p.id.clone(),
                 content_preview: truncate_string(&p.content, 50),
                 quality_score: quality,
                 efficiency_score: efficiency,
                 created_at: p.created_at,
-            })
+            }
         })
         .collect();
     top_prompts.sort_by(|a, b| b.quality_score.partial_cmp(&a.quality_score).unwrap());
@@ -704,13 +708,13 @@ mod tests {
     #[test]
     fn test_report_format_from_str() {
         assert_eq!(
-            ReportFormat::from_str("markdown"),
-            Some(ReportFormat::Markdown)
+            "markdown".parse::<ReportFormat>(),
+            Ok(ReportFormat::Markdown)
         );
-        assert_eq!(ReportFormat::from_str("html"), Some(ReportFormat::Html));
-        assert_eq!(ReportFormat::from_str("json"), Some(ReportFormat::Json));
-        assert_eq!(ReportFormat::from_str("csv"), Some(ReportFormat::Csv));
-        assert_eq!(ReportFormat::from_str("invalid"), None);
+        assert_eq!("html".parse::<ReportFormat>(), Ok(ReportFormat::Html));
+        assert_eq!("json".parse::<ReportFormat>(), Ok(ReportFormat::Json));
+        assert_eq!("csv".parse::<ReportFormat>(), Ok(ReportFormat::Csv));
+        assert!("invalid".parse::<ReportFormat>().is_err());
     }
 
     #[test]
