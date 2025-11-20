@@ -20,21 +20,39 @@
 //!     analysis::{QualityAnalyzer, EfficiencyAnalyzer},
 //! };
 //!
-//! // Initialize database
-//! let db = Database::new("~/.prompt-tracking/prompts.db").unwrap();
+//! fn main() -> prompt_tracking::Result<()> {
+//!     // Initialize database
+//!     let db = Database::new("~/.prompt-tracking/prompts.db")?;
 //!
-//! // Capture a prompt
-//! let service = CaptureService::default();
-//! let prompt = service.process_content("Write a function to sort an array").unwrap();
+//!     // Capture a prompt
+//!     let service = CaptureService::default();
+//!     let prompt = service.process_content("Write a function to sort an array")?;
 //!
-//! // Save to database
-//! db.create_prompt(&prompt).unwrap();
+//!     // Save to database
+//!     db.create_prompt(&prompt)?;
 //!
-//! // Analyze quality
-//! let analyzer = QualityAnalyzer::default();
-//! let score = analyzer.analyze(&prompt).unwrap();
-//! println!("Quality Score: {:.1}", score.total_score);
+//!     // Analyze quality
+//!     let analyzer = QualityAnalyzer::default();
+//!     let score = analyzer.analyze(&prompt)?;
+//!     println!("Quality Score: {:.1}", score.total_score);
+//!
+//!     Ok(())
+//! }
 //! ```
+
+// Clippy lints for better code quality (Rust API Guidelines)
+#![warn(clippy::all)]
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![warn(clippy::missing_errors_doc)]
+#![warn(clippy::missing_panics_doc)]
+#![warn(missing_docs)]
+#![warn(rustdoc::missing_crate_level_docs)]
+// Allow some pedantic lints that are too strict for this codebase
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::missing_errors_doc)] // Will be addressed incrementally
+#![allow(clippy::missing_panics_doc)] // Will be addressed incrementally
 
 pub mod models;
 pub mod database;

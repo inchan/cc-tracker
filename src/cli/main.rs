@@ -1,6 +1,29 @@
 //! Prompt Tracking CLI
 //!
 //! Command-line interface for the Prompt Tracking System.
+//!
+//! This CLI provides comprehensive commands for managing prompts, including:
+//! - Capturing and storing prompts
+//! - Analyzing prompt quality and efficiency
+//! - Generating reports
+//! - Managing prompt versions and history
+//! - Exporting and importing data
+//!
+//! ## Usage
+//!
+//! ```bash
+//! # Capture a new prompt
+//! prompt-tracking capture "Write a function to sort an array"
+//!
+//! # List stored prompts
+//! prompt-tracking list --limit 10
+//!
+//! # Analyze prompt quality
+//! prompt-tracking analyze <prompt-id>
+//!
+//! # Generate a weekly report
+//! prompt-tracking report --type weekly --format markdown
+//! ```
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -314,6 +337,25 @@ fn main() {
     }
 }
 
+/// Captures a new prompt and saves it to the database.
+///
+/// This function processes prompt content from either a direct string or file,
+/// applies optional category and tags, checks for duplicates, and saves the prompt.
+/// If auto-analysis is enabled in the configuration, it also analyzes the prompt's
+/// quality and efficiency scores.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `config` - Application configuration
+/// * `content` - Optional prompt content as a string
+/// * `file` - Optional path to a file containing the prompt
+/// * `category` - Optional category to assign to the prompt
+/// * `tags` - Optional comma-separated tags to assign
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message describing what went wrong.
 fn cmd_capture(
     db: &Database,
     config: &Config,
@@ -394,6 +436,21 @@ fn cmd_capture(
     Ok(())
 }
 
+/// Lists stored prompts with optional filtering.
+///
+/// Displays prompts in a table format showing ID, category, tags, and a content preview.
+/// Results can be filtered by category and tags, and limited to a maximum number.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `limit` - Maximum number of prompts to display
+/// * `category` - Optional category filter
+/// * `tags` - Optional comma-separated tags filter
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 fn cmd_list(
     db: &Database,
     limit: usize,
@@ -444,6 +501,19 @@ fn cmd_list(
     Ok(())
 }
 
+/// Retrieves and displays detailed information about a specific prompt.
+///
+/// Shows all prompt metadata including creation time, category, tags, content,
+/// and any associated quality scores and efficiency metrics.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `id` - The unique identifier of the prompt to retrieve
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if the prompt is not found.
 fn cmd_get(db: &Database, id: &str) -> Result<(), String> {
     let prompt = db
         .get_prompt(id)
@@ -505,6 +575,21 @@ fn cmd_get(db: &Database, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Analyzes prompt quality and efficiency metrics.
+///
+/// Performs quality analysis (clarity, completeness, specificity, guidance) and
+/// efficiency analysis (token, time, cost efficiency) on one or all prompts.
+/// Results are saved to the database and displayed.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `config` - Application configuration containing analysis weights
+/// * `id` - Prompt ID to analyze, or "all" to analyze all prompts
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 fn cmd_analyze(db: &Database, config: &Config, id: &str) -> Result<(), String> {
     let quality_analyzer = QualityAnalyzer::new(config.analysis.quality_weights.clone());
     let efficiency_analyzer = EfficiencyAnalyzer::default();
@@ -583,6 +668,21 @@ fn cmd_analyze(db: &Database, config: &Config, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Generates a report of prompt activity and metrics.
+///
+/// Creates weekly or monthly reports in various formats (Markdown, HTML, JSON, CSV).
+/// Reports include prompt counts, quality scores, efficiency metrics, and trends.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `report_type` - Type of report: "weekly" or "monthly"
+/// * `format` - Output format: "markdown", "html", "json", or "csv"
+/// * `output` - Optional file path to save the report; prints to stdout if not provided
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 fn cmd_report(
     db: &Database,
     report_type: &str,
@@ -640,6 +740,20 @@ fn cmd_report(
     Ok(())
 }
 
+/// Searches for prompts matching a query string.
+///
+/// Performs a full-text search across prompt content and displays matching results
+/// with their IDs, categories, previews, and creation dates.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `query` - Search query string
+/// * `limit` - Maximum number of results to return
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 fn cmd_search(db: &Database, query: &str, limit: usize) -> Result<(), String> {
     let filter = PromptFilter {
         search_query: Some(query.to_string()),
@@ -672,6 +786,18 @@ fn cmd_search(db: &Database, query: &str, limit: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// Displays system status and statistics.
+///
+/// Shows an overview of the prompt tracking system including total prompts,
+/// analyzed prompts, average quality score, and category breakdown.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 fn cmd_status(db: &Database) -> Result<(), String> {
     let total_prompts = db
         .count_prompts()
@@ -719,6 +845,19 @@ fn cmd_status(db: &Database) -> Result<(), String> {
     Ok(())
 }
 
+/// Deletes a prompt from the database.
+///
+/// Permanently removes a prompt and all associated data (quality scores,
+/// efficiency metrics, version history) from the database.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `id` - The unique identifier of the prompt to delete
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if the prompt is not found.
 fn cmd_delete(db: &Database, id: &str) -> Result<(), String> {
     // Check if prompt exists
     let _ = db
@@ -734,6 +873,23 @@ fn cmd_delete(db: &Database, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Updates an existing prompt with new values.
+///
+/// Modifies one or more fields of an existing prompt. The previous version
+/// is automatically saved to the version history before updating.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `id` - The unique identifier of the prompt to update
+/// * `category` - Optional new category
+/// * `content` - Optional new content
+/// * `tags` - Optional comma-separated tags to add
+/// * `context` - Optional new context
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if no updates are specified or the prompt is not found.
 fn cmd_update(
     db: &Database,
     id: &str,
@@ -794,6 +950,19 @@ fn cmd_update(
     Ok(())
 }
 
+/// Displays version history for a prompt.
+///
+/// Shows all previous versions of a prompt including version numbers,
+/// timestamps, and content previews.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `id` - The unique identifier of the prompt
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if the prompt is not found.
 fn cmd_history(db: &Database, id: &str) -> Result<(), String> {
     // Check if prompt exists
     let _ = db
@@ -822,6 +991,20 @@ fn cmd_history(db: &Database, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Reverts a prompt to a previous version.
+///
+/// Restores a prompt's content and metadata to a specific version from its history.
+/// The current state is preserved in the version history.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `id` - The unique identifier of the prompt
+/// * `version` - The version number to revert to
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if the prompt or version is not found.
 fn cmd_revert(db: &Database, id: &str, version: i32) -> Result<(), String> {
     // Check if prompt exists
     let _ = db
@@ -837,6 +1020,20 @@ fn cmd_revert(db: &Database, id: &str, version: i32) -> Result<(), String> {
     Ok(())
 }
 
+/// Shows trends and statistics over time.
+///
+/// Displays either daily trends (prompt count, average quality, average efficiency)
+/// or category distribution depending on the options provided.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `days` - Number of days to analyze for trends
+/// * `show_categories` - If true, shows category distribution instead of daily trends
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 fn cmd_trends(db: &Database, days: i32, show_categories: bool) -> Result<(), String> {
     if show_categories {
         // Show category distribution
@@ -886,6 +1083,20 @@ fn cmd_trends(db: &Database, days: i32, show_categories: bool) -> Result<(), Str
     Ok(())
 }
 
+/// Exports all prompts to a file.
+///
+/// Serializes all prompt data to a file in the specified format for backup
+/// or transfer purposes.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `output` - Path to the output file
+/// * `format` - Export format (currently only "json" is supported)
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 fn cmd_export(db: &Database, output: &PathBuf, format: &str) -> Result<(), String> {
     match format.to_lowercase().as_str() {
         "json" => {
@@ -906,6 +1117,20 @@ fn cmd_export(db: &Database, output: &PathBuf, format: &str) -> Result<(), Strin
     Ok(())
 }
 
+/// Imports prompts from a file.
+///
+/// Deserializes prompt data from a file and adds it to the database.
+/// Useful for restoring backups or transferring data between systems.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `input` - Path to the input file
+/// * `_skip_duplicates` - Reserved for future use to skip duplicate prompts
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 fn cmd_import(db: &Database, input: &PathBuf, _skip_duplicates: bool) -> Result<(), String> {
     let json_str = std::fs::read_to_string(input)
         .map_err(|e| format!("Failed to read file: {}", e))?;
@@ -919,6 +1144,19 @@ fn cmd_import(db: &Database, input: &PathBuf, _skip_duplicates: bool) -> Result<
     Ok(())
 }
 
+/// Initializes the database and configuration.
+///
+/// Creates a new database file and sets up the required schema.
+/// Will not overwrite an existing database unless the force flag is set.
+///
+/// # Arguments
+///
+/// * `config` - Application configuration containing the database path
+/// * `force` - If true, overwrites existing database
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 fn cmd_init(config: &Config, force: bool) -> Result<(), String> {
     let db_path = std::path::Path::new(&config.database.path);
 
@@ -955,6 +1193,19 @@ fn cmd_init(config: &Config, force: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Archives a prompt.
+///
+/// Marks a prompt as archived, hiding it from default listings while preserving
+/// its data for future reference.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `id` - The unique identifier of the prompt to archive
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if the prompt is not found.
 fn cmd_archive(db: &Database, id: &str) -> Result<(), String> {
     db.archive_prompt(id)
         .map_err(|e| format!("Failed to archive prompt: {}", e))?;
@@ -964,6 +1215,19 @@ fn cmd_archive(db: &Database, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Unarchives a prompt.
+///
+/// Restores a previously archived prompt to active status, making it visible
+/// in default listings again.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `id` - The unique identifier of the prompt to unarchive
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if the prompt is not found.
 fn cmd_unarchive(db: &Database, id: &str) -> Result<(), String> {
     db.unarchive_prompt(id)
         .map_err(|e| format!("Failed to unarchive prompt: {}", e))?;
@@ -973,6 +1237,22 @@ fn cmd_unarchive(db: &Database, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Watches a directory for new prompt files.
+///
+/// Starts a file watcher that monitors a directory for new or modified prompt files
+/// and automatically captures them. Runs continuously until interrupted with Ctrl+C.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `config` - Application configuration
+/// * `watch_dir` - Optional directory path to watch; uses config default if not provided
+/// * `_category` - Reserved for future use
+/// * `_tags` - Reserved for future use
+///
+/// # Returns
+///
+/// This function runs indefinitely and only returns on error.
 fn cmd_watch(
     db: &Database,
     config: &Config,
@@ -1033,6 +1313,22 @@ fn cmd_watch(
     }
 }
 
+/// Queries prompts using advanced filter syntax.
+///
+/// Supports powerful filtering with syntax like:
+/// - `category:code` - Filter by category
+/// - `tag:rust` - Filter by tag
+/// - `quality:>80` - Filter by quality score
+/// - `date:>2024-01-01` - Filter by creation date
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `query` - Advanced filter query string
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 fn cmd_query(db: &Database, query: &str) -> Result<(), String> {
     // Parse the advanced filter query
     let filter = parse_filter_query(query)
